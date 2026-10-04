@@ -45,8 +45,8 @@ Pitlane is a comprehensive Formula 1 dashboard that combines live race data with
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/YOUR_USERNAME/f1app.git
-cd f1app
+git clone https://github.com/efelix32/pitlane-f1-dashboard.git
+cd pitlane-f1-dashboard
 ```
 
 ### 2. Install dependencies
@@ -74,9 +74,7 @@ npm run dev
 
 ## 📸 Screenshots
 
-| Dashboard | Drivers | Fantasy Team |
-|---|---|---|
-| *Coming soon* | *Coming soon* | *Coming soon* |
+Check out the [live demo](https://pitlanef1.vercel.app) to see it in action.
 
 ---
 
@@ -115,8 +113,8 @@ Pitlane, canlı yarış verilerini çarpıcı bir karanlık mod arayüzüyle bir
 ## 🔧 Kurulum
 
 ```bash
-git clone https://github.com/KULLANICI_ADIN/f1app.git
-cd f1app
+git clone https://github.com/efelix32/pitlane-f1-dashboard.git
+cd pitlane-f1-dashboard
 npm install
 # .env dosyası oluştur ve Firebase bilgilerini ekle
 npm run dev
