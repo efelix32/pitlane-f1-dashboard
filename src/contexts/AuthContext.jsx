@@ -1,26 +1,56 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { auth, db, isFirebaseReady } from '../firebase';
 import {
-  signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signInWithPopup, signInWithRedirect, GoogleAuthProvider, getRedirectResult, onAuthStateChanged, signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+  GoogleAuthProvider,
+  getRedirectResult,
+  onAuthStateChanged,
+  signOut,
   updateProfile as fbUpdateProfile,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from 'firebase/firestore';
 
 const AuthContext = createContext(null);
 const STORAGE_KEY = 'pitlane_user_v1';
 
 function loadUser() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; }
-  catch { return null; }
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null;
+  } catch {
+    return null;
+  }
 }
 function saveUser(u) {
   if (u) localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
   else localStorage.removeItem(STORAGE_KEY);
 }
 
+async function hashPassword(password) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 function makeAvatar(name) {
-  return (name || 'F').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  return (name || 'F')
+    .split(' ')
+    .map(w => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 async function fbUserToApp(fbUser) {
@@ -40,7 +70,13 @@ async function fbUserToApp(fbUser) {
         const data = snap.data();
         return { ...base, ...data, id: fbUser.uid, email: fbUser.email };
       }
-    } catch (e) { console.error('Firestore load error:', e); }
+    } catch (e) {
+      console.error('Firestore load error:', e);
+      // Okuma başarısızsa boş profille yerel veriyi ezme; önbellekteki profili koru.
+      const cached = loadUser();
+      if (cached?.id === fbUser.uid)
+        return { ...base, ...cached, id: fbUser.uid, email: fbUser.email };
+    }
   }
 
   return { ...base, favDrivers: [], favTeams: [], fantasyTeam: null };
@@ -56,11 +92,15 @@ async function saveToFirestore(uid, data) {
     } else {
       await setDoc(ref, { ...data, joinedAt: new Date().toISOString() });
     }
-  } catch (e) { console.error('Firestore save error:', e); }
+  } catch (e) {
+    console.error('Firestore save error:', e);
+  }
 }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(loadUser);
+  const userRef = useRef(user);
+  userRef.current = user;
   const [authModal, setAuthModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -71,15 +111,17 @@ export function AuthProvider({ children }) {
     }
 
     // Check redirect result for mobile Google login
-    getRedirectResult(auth).then(async (result) => {
-      if (result?.user) {
-        const appUser = await fbUserToApp(result.user);
-        setUser(appUser);
-        saveUser(appUser);
-      }
-    }).catch(err => console.error('Redirect result error:', err));
+    getRedirectResult(auth)
+      .then(async result => {
+        if (result?.user) {
+          const appUser = await fbUserToApp(result.user);
+          setUser(appUser);
+          saveUser(appUser);
+        }
+      })
+      .catch(err => console.error('Redirect result error:', err));
 
-    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+    const unsub = onAuthStateChanged(auth, async fbUser => {
       if (fbUser) {
         const appUser = await fbUserToApp(fbUser);
         setUser(appUser);
@@ -106,10 +148,13 @@ export function AuthProvider({ children }) {
     }
     const existing = JSON.parse(localStorage.getItem(`pl_acc_${email}`) || 'null');
     if (existing) {
-      if (existing.password !== password) throw new Error('Şifre yanlış');
+      const pHash = await hashPassword(password);
+      if (existing.pHash !== pHash) throw new Error('Şifre yanlış');
       const u = { ...existing };
-      delete u.password;
-      setUser(u); saveUser(u); return u;
+      delete u.pHash;
+      setUser(u);
+      saveUser(u);
+      return u;
     }
     throw new Error('Hesap bulunamadı. Kayıt olun.');
   }, []);
@@ -135,8 +180,11 @@ export function AuthProvider({ children }) {
       appUser.favTeams = [];
       appUser.fantasyTeam = null;
       await saveToFirestore(cred.user.uid, {
-        name: appUser.name, avatar: appUser.avatar,
-        favDrivers: [], favTeams: [], fantasyTeam: null,
+        name: appUser.name,
+        avatar: appUser.avatar,
+        favDrivers: [],
+        favTeams: [],
+        fantasyTeam: null,
       });
       setUser(appUser);
       saveUser(appUser);
@@ -146,20 +194,28 @@ export function AuthProvider({ children }) {
     if (existing) throw new Error('Bu e-posta zaten kayıtlı.');
     const u = {
       id: Date.now().toString(),
-      email, name: name || email.split('@')[0],
+      email,
+      name: name || email.split('@')[0],
       avatar: makeAvatar(name || email),
-      favDrivers: [], favTeams: [], fantasyTeam: null,
+      favDrivers: [],
+      favTeams: [],
+      fantasyTeam: null,
       joinedAt: new Date().toISOString(),
     };
-    localStorage.setItem(`pl_acc_${email}`, JSON.stringify({ ...u, password }));
-    setUser(u); saveUser(u); return u;
+    const pHash = await hashPassword(password);
+    localStorage.setItem(`pl_acc_${email}`, JSON.stringify({ ...u, pHash }));
+    setUser(u);
+    saveUser(u);
+    return u;
   }, []);
 
   const googleLogin = useCallback(async () => {
     if (isFirebaseReady() && auth) {
       const provider = new GoogleAuthProvider();
       // Mobile detection for smooth Google Sign In
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      );
       if (isMobile) {
         await signInWithRedirect(auth, provider);
       } else {
@@ -167,8 +223,10 @@ export function AuthProvider({ children }) {
           const cred = await signInWithPopup(auth, provider);
           const appUser = await fbUserToApp(cred.user);
           await saveToFirestore(cred.user.uid, {
-            name: appUser.name, avatar: appUser.avatar,
-            favDrivers: appUser.favDrivers || [], favTeams: appUser.favTeams || [],
+            name: appUser.name,
+            avatar: appUser.avatar,
+            favDrivers: appUser.favDrivers || [],
+            favTeams: appUser.favTeams || [],
           });
           setUser(appUser);
           saveUser(appUser);
@@ -183,44 +241,75 @@ export function AuthProvider({ children }) {
     // Fallback
     const email = 'google_user@gmail.com';
     const existing = JSON.parse(localStorage.getItem(`pl_acc_${email}`) || 'null');
-    const u = existing ? { ...existing } : {
-      id: 'google_' + Date.now(),
-      email, name: 'Google Kullanici', avatar: 'GK',
-      favDrivers: [], favTeams: [], fantasyTeam: null,
-      joinedAt: new Date().toISOString(), isGoogle: true,
-    };
+    const u = existing
+      ? { ...existing }
+      : {
+          id: 'google_' + Date.now(),
+          email,
+          name: 'Google Kullanici',
+          avatar: 'GK',
+          favDrivers: [],
+          favTeams: [],
+          fantasyTeam: null,
+          joinedAt: new Date().toISOString(),
+          isGoogle: true,
+        };
     if (u.password) delete u.password;
     if (!existing) localStorage.setItem(`pl_acc_${email}`, JSON.stringify({ ...u }));
-    setUser(u); saveUser(u); return u;
+    setUser(u);
+    saveUser(u);
+    return u;
   }, []);
 
   const logout = useCallback(async () => {
     if (isFirebaseReady() && auth) {
-      try { await signOut(auth); } catch (e) { console.error('Logout error:', e); }
+      try {
+        await signOut(auth);
+      } catch (e) {
+        console.error('Logout error:', e);
+      }
     }
     setUser(null);
     saveUser(null);
   }, []);
 
-  const updateProfile = useCallback((patch) => {
-    setUser(prev => {
-      if (!prev) return prev;
-      const next = { ...prev, ...patch };
-      saveUser(next);
+  const updateProfile = useCallback(patch => {
+    const prev = userRef.current;
+    if (!prev) return;
+    const next = { ...prev, ...patch };
+    userRef.current = next;
+    setUser(next);
+    saveUser(next);
+    try {
       const stored = JSON.parse(localStorage.getItem(`pl_acc_${prev.email}`) || '{}');
       localStorage.setItem(`pl_acc_${prev.email}`, JSON.stringify({ ...stored, ...patch }));
-      if (prev.id && isFirebaseReady()) {
-        saveToFirestore(prev.id, patch);
-      }
-      return next;
-    });
+    } catch (e) {
+      console.error('Local save error:', e);
+    }
+    if (prev.id && isFirebaseReady()) {
+      // Firestore undefined değerleri reddeder
+      saveToFirestore(prev.id, JSON.parse(JSON.stringify(patch)));
+    }
   }, []);
 
   const openAuth = useCallback(() => setAuthModal(true), []);
   const closeAuth = useCallback(() => setAuthModal(false), []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, googleLogin, logout, updateProfile, authModal, openAuth, closeAuth }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        register,
+        googleLogin,
+        logout,
+        updateProfile,
+        authModal,
+        openAuth,
+        closeAuth,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

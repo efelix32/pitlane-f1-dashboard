@@ -8,24 +8,31 @@ async function fetchWithFallback(path2026, path2025, extract) {
     const res = await axios.get(`${BASE_URL}${path2026}`);
     const items = extract(res.data);
     if (items && items.length > 0) return { items, season: '2026' };
-  } catch {}
+  } catch {
+    // 2026 verisi henüz yok veya erişilemedi; 2025'e düş
+  }
   try {
     const res = await axios.get(`${BASE_URL}${path2025}`);
     const items = extract(res.data);
     return { items: items || [], season: '2025' };
-  } catch {}
+  } catch {
+    // 2025 de alınamadı; boş sonuç dön
+  }
   return { items: [], season: '2025' };
 }
 
 export function useDriverStandings() {
   const query = useQuery({
     queryKey: ['driverStandings'],
-    queryFn: () => fetchWithFallback(
-      '/2026/driverStandings.json?limit=30',
-      '/2025/driverStandings.json?limit=30',
-      d => d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings
-    ),
-    staleTime: 1000 * 60 * 5, // Cache for 5 mins
+    queryFn: () =>
+      fetchWithFallback(
+        '/2026/driverStandings.json?limit=30',
+        '/2025/driverStandings.json?limit=30',
+        d => d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings
+      ),
+    staleTime: 1000 * 60 * 2,
+    refetchInterval: 1000 * 60 * 5,
+    refetchOnWindowFocus: true,
   });
 
   return {
@@ -38,12 +45,15 @@ export function useDriverStandings() {
 export function useConstructorStandings() {
   const query = useQuery({
     queryKey: ['constructorStandings'],
-    queryFn: () => fetchWithFallback(
-      '/2026/constructorStandings.json?limit=20',
-      '/2025/constructorStandings.json?limit=20',
-      d => d?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings
-    ),
-    staleTime: 1000 * 60 * 5,
+    queryFn: () =>
+      fetchWithFallback(
+        '/2026/constructorStandings.json?limit=20',
+        '/2025/constructorStandings.json?limit=20',
+        d => d?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings
+      ),
+    staleTime: 1000 * 60 * 2,
+    refetchInterval: 1000 * 60 * 5,
+    refetchOnWindowFocus: true,
   });
 
   return {
@@ -56,11 +66,7 @@ export function useConstructorStandings() {
 export function useRaceSchedule() {
   const query = useQuery({
     queryKey: ['raceSchedule'],
-    queryFn: () => fetchWithFallback(
-      '/2026.json',
-      '/2025.json',
-      d => d?.MRData?.RaceTable?.Races
-    ),
+    queryFn: () => fetchWithFallback('/2026.json', '/2025.json', d => d?.MRData?.RaceTable?.Races),
     staleTime: 1000 * 60 * 60, // 1 hour
   });
 
@@ -74,12 +80,15 @@ export function useRaceSchedule() {
 export function useLastRaceResults() {
   const query = useQuery({
     queryKey: ['lastRaceResults'],
-    queryFn: () => fetchWithFallback(
-      '/2026/last/results.json?limit=25',
-      '/2025/last/results.json?limit=25',
-      d => d?.MRData?.RaceTable?.Races
-    ),
-    staleTime: 1000 * 60 * 5,
+    queryFn: () =>
+      fetchWithFallback(
+        '/2026/last/results.json?limit=25',
+        '/2025/last/results.json?limit=25',
+        d => d?.MRData?.RaceTable?.Races
+      ),
+    staleTime: 1000 * 60 * 2,
+    refetchInterval: 1000 * 60 * 5,
+    refetchOnWindowFocus: true,
   });
 
   const race = query.data?.items?.[0] || null;
@@ -94,11 +103,12 @@ export function useLastRaceResults() {
 export function useDrivers() {
   const query = useQuery({
     queryKey: ['drivers'],
-    queryFn: () => fetchWithFallback(
-      '/2026/drivers.json?limit=30',
-      '/2025/drivers.json?limit=30',
-      d => d?.MRData?.DriverTable?.Drivers
-    ),
+    queryFn: () =>
+      fetchWithFallback(
+        '/2026/drivers.json?limit=30',
+        '/2025/drivers.json?limit=30',
+        d => d?.MRData?.DriverTable?.Drivers
+      ),
     staleTime: 1000 * 60 * 60,
   });
 
@@ -112,11 +122,12 @@ export function useDrivers() {
 export function useConstructors() {
   const query = useQuery({
     queryKey: ['constructors'],
-    queryFn: () => fetchWithFallback(
-      '/2026/constructors.json?limit=20',
-      '/2025/constructors.json?limit=20',
-      d => d?.MRData?.ConstructorTable?.Constructors
-    ),
+    queryFn: () =>
+      fetchWithFallback(
+        '/2026/constructors.json?limit=20',
+        '/2025/constructors.json?limit=20',
+        d => d?.MRData?.ConstructorTable?.Constructors
+      ),
     staleTime: 1000 * 60 * 60,
   });
 

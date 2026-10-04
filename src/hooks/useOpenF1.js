@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const BASE_URL = 'https://api.openf1.org/v1';
 
@@ -17,20 +17,27 @@ export function useLatestSession() {
       const currentYear = new Date().getFullYear();
       let data = await fetchOpenF1('/sessions', { year: currentYear });
       let list = Array.isArray(data) ? data : [];
-      
+
       if (list.length === 0) {
         data = await fetchOpenF1('/sessions', { year: currentYear - 1 });
         list = Array.isArray(data) ? data : [];
       }
-      
+
       list.sort((a, b) => new Date(b.date_start) - new Date(a.date_start));
       return list;
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
+    refetchInterval: 1000 * 60,
   });
 
+  // Henüz başlamamış (gelecekteki) oturumları atla; en son başlayanı seç.
+  const now = Date.now();
+  const started = (query.data || []).find(
+    s => new Date(s.date_start).getTime() <= now + 15 * 60_000
+  );
+
   return {
-    session: query.data?.[0] || null,
+    session: started || query.data?.[0] || null,
     sessions: query.data || [],
     loading: query.isLoading,
     error: query.error?.message,
@@ -47,51 +54,53 @@ export function useSessionDrivers(sessionKey) {
 
   const drivers = Array.isArray(query.data) ? query.data : [];
   const driverMap = {};
-  drivers.forEach(d => { driverMap[d.driver_number] = d; });
+  drivers.forEach(d => {
+    driverMap[d.driver_number] = d;
+  });
 
   return { drivers, driverMap, loading: query.isLoading };
 }
 
-export function useSessionPositions(sessionKey, isLive = false) {
-  const query = useQuery({
-    queryKey: ['sessionPositions', sessionKey],
+// Her sürücünün son kaydını tutar. Canlıyken sadece son çekimden sonraki
+// satırları ister (`date>`), böylece her 5 sn'de tüm oturum indirilmez.
+function useLatestPerDriver(name, endpoint, sessionKey, isLive) {
+  const qc = useQueryClient();
+  const queryKey = [name, sessionKey];
+  return useQuery({
+    queryKey,
     queryFn: async () => {
-      const data = await fetchOpenF1('/position', { session_key: sessionKey });
-      if (!Array.isArray(data)) return [];
-      const map = {};
-      data.forEach(p => {
-        if (!map[p.driver_number] || new Date(p.date) > new Date(map[p.driver_number].date)) {
-          map[p.driver_number] = p;
-        }
+      const prev = qc.getQueryData(queryKey);
+      const params = { session_key: sessionKey };
+      if (prev?.lastDate) params['date>'] = prev.lastDate;
+      const data = await fetchOpenF1(endpoint, params);
+      const map = { ...(prev?.map || {}) };
+      let lastDate = prev?.lastDate;
+      (Array.isArray(data) ? data : []).forEach(row => {
+        const cur = map[row.driver_number];
+        if (!cur || new Date(row.date) > new Date(cur.date)) map[row.driver_number] = row;
+        if (!lastDate || row.date > lastDate) lastDate = row.date;
       });
-      return Object.values(map).sort((a, b) => a.position - b.position);
+      return { map, lastDate };
     },
     enabled: !!sessionKey,
     refetchInterval: isLive ? 5000 : false,
   });
+}
 
-  return { positions: query.data || [], loading: query.isLoading, refetch: query.refetch };
+export function useSessionPositions(sessionKey, isLive = false) {
+  const query = useLatestPerDriver('sessionPositions', '/position', sessionKey, isLive);
+  const positions = Object.values(query.data?.map || {}).sort((a, b) => a.position - b.position);
+  return {
+    positions,
+    loading: query.isLoading,
+    error: query.error?.message,
+    refetch: query.refetch,
+  };
 }
 
 export function useSessionIntervals(sessionKey, isLive = false) {
-  const query = useQuery({
-    queryKey: ['sessionIntervals', sessionKey],
-    queryFn: async () => {
-      const data = await fetchOpenF1('/intervals', { session_key: sessionKey });
-      if (!Array.isArray(data)) return [];
-      const map = {};
-      data.forEach(i => {
-        if (!map[i.driver_number] || new Date(i.date) > new Date(map[i.driver_number].date)) {
-          map[i.driver_number] = i;
-        }
-      });
-      return Object.values(map);
-    },
-    enabled: !!sessionKey,
-    refetchInterval: isLive ? 5000 : false,
-  });
-
-  return { intervals: query.data || [] };
+  const query = useLatestPerDriver('sessionIntervals', '/intervals', sessionKey, isLive);
+  return { intervals: Object.values(query.data?.map || {}) };
 }
 
 export function useRaceControl(sessionKey, isLive = false) {
